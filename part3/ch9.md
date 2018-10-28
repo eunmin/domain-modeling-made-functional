@@ -113,3 +113,224 @@ type​ CheckAddressExists =
       -> UnvalidatedOrder     ​// input​
       -> ValidatedOrder       ​// output​
 ```
+
+- 이제 validateOrder 함수를 구현해보자.
+
+```f#
+let​ validateOrder : ValidateOrder =
+  fun​ checkProductCodeExists checkAddressExists unvalidatedOrder ->
+​ 
+    ​let​ orderId =
+      unvalidatedOrder.OrderId
+      |> OrderId.create
+
+    ​let​ customerInfo =
+      unvalidatedOrder.CustomerInfo
+      |> toCustomerInfo   ​// helper function​
+
+    ​let​ shippingAddress =
+      unvalidatedOrder.ShippingAddress
+      |> toAddress        ​// helper function​
+​ 
+    ​// and so on, for each property of the unvalidatedOrder​
+​ 
+    ​// when all the fields are ready, use them to​
+    ​// create and return a new "ValidatedOrder" record​
+    {
+      OrderId = orderId
+      CustomerInfo = customerInfo
+      ShippingAddress = shippingAddress
+      BillingAddress = ...
+      Lines = ...
+    }
+```
+
+- 서브 컴포넌트인 toCustomerInfo 함수는 아래 처럼 만들 수 있다.
+
+```f#
+let​ toCustomerInfo (customer:UnvalidatedCustomerInfo) : CustomerInfo =
+  // create the various CustomerInfo properties​
+  ​// and throw exceptions if invalid​
+  let​ firstName = customer.FirstName |> String50.create
+  ​let​ lastName = customer.LastName |> String50.create
+  ​let​ emailAddress = customer.EmailAddress |> EmailAddress.create
+
+  ​// create a PersonalName​
+  ​let​ name : PersonalName = {
+    FirstName = firstName
+    LastName = lastName
+  }
+
+  // create a CustomerInfo​
+  ​let​ customerInfo : CustomerInfo = {
+    Name = name
+    EmailAddress = emailAddress
+  }
+  // ... and return it​
+  customerInfo
+```
+- toAddress 함수는 checkAddressExists 디팬던시를 사용하기 때문에 조금 복잡하다
+
+```f#
+let​ toAddress (checkAddressExists:CheckAddressExists) unvalidatedAddress =
+  ​// call the remote service​
+  ​let​ checkedAddress = checkAddressExists unvalidatedAddress
+  ​// extract the inner value using pattern matching​
+  ​let​ (CheckedAddress checkedAddress) = checkedAddress
+
+  ​let​ addressLine1 =
+    checkedAddress.AddressLine1 |> String50.create
+  ​let​ addressLine2 =
+    checkedAddress.AddressLine2 |> String50.createOption
+  ​let​ addressLine3 =
+    checkedAddress.AddressLine3 |> String50.createOption
+  ​let​ addressLine4 =
+    checkedAddress.AddressLine4 |> String50.createOption
+  ​let​ city =
+    checkedAddress.City |> String50.create
+  ​let​ zipCode =
+    checkedAddress.ZipCode |> ZipCode.create
+  ​// create the address​
+  ​let​ address : Address = {
+    AddressLine1 = addressLine1
+    AddressLine2 = addressLine2
+    AddressLine3 = addressLine3
+    AddressLine4 = addressLine4
+    City = city
+    ZipCode = zipCode
+  }
+  // return the address​
+  address
+```
+
+- CheckAddressExists 디팬던시는 toAddress를 사용하는 validateOrder에 가지고 있기 때문에
+  전달해줄 수 있다.
+
+```f#
+let​ validateOrder : ValidateOrder =
+  ​fun​ checkProductCodeExists checkAddressExists unvalidatedOrder ->
+    ​let​ orderId = ...
+    ​let​ customerInfo = ...
+    ​let​ shippingAddress =
+      unvalidatedOrder.ShippingAddress
+      |> toAddress checkAddressExists ​// new parameter​
+      ​ 
+    ...
+```
+
+- 위에 보면 toAddress는 인자가 두개 인데 하나만 전달해 주는 이유는 나머지 인자는 파이프닝으로 전달되기
+  때문이다.
+
+### Creating the Order Lines
+
+- 먼저 UnvalidatedOrderLine 하나를 ValidatedOrderLine으로 변환하는 함수를 만들어보자
+
+```f#
+​let​ toValidatedOrderLine checkProductCodeExists
+  (unvalidatedOrderLine:UnvalidatedOrderLine) =
+    let​ orderLineId =
+      unvalidatedOrderLine.OrderLineId
+      |> OrderLineId.create
+    ​let​ productCode =
+      unvalidatedOrderLine.ProductCode
+      |> toProductCode checkProductCodeExists ​// helper function​
+    ​let​ quantity =
+      unvalidatedOrderLine.Quantity
+      |> toOrderQuantity productCode  ​// helper function​
+    ​let​ validatedOrderLine = {
+      OrderLineId = orderLineId
+      ProductCode = productCode
+      Quantity = quantity
+    }
+    validatedOrderLine
+```
+
+- 이제 리스트 형식의 OrderLine을 변환하는 코드를 만들어보자.
+
+```f#
+​let​ validateOrder : ValidateOrder =
+  fun​ checkProductCodeExists checkAddressExists unvalidatedOrder ->
+
+    ​let​ orderId = ...
+    ​let​ customerInfo = ...
+    ​let​ shippingAddress = ...
+    ​ 
+    ​let​ orderLines =
+      unvalidatedOrder.Lines
+      ​// convert each line using `toValidatedOrderLine`​
+      |> List.map (toValidatedOrderLine checkProductCodeExists)
+      ...
+```
+
+- 다음은 toOrderQuantity 헬퍼 함수다.
+
+```f#
+let​ toOrderQuantity productCode quantity =
+  match​ productCode ​with​
+    | Widget _ ->
+      quantity
+      |> ​int​                  ​// convert decimal to int​
+      |> UnitQuantity.create  ​// to UnitQuantity​
+      |> OrderQuantity.Unit   ​// lift to OrderQuantity type​
+    | Gizmo _ ->
+      quantity
+      |> KilogramQuantity.create  ​// to KilogramQuantity​
+      |> OrderQuantity.Kilogram   ​// lift to OrderQuantity type​’
+```
+
+- productCode가 Widget 형식 또는 Gizmo 형식에 따라 분기가 되어 있다. 리턴 타입을 맞추기 위해서
+  OrderQuantity 타입으로 마지막에 맞춰줬다.
+
+- 다음은 toProductCode 헬퍼 함수다.
+
+```f#
+let​ toProductCode (checkProductCodeExists:CheckProductCodeExists) productCode =
+  productCode
+  |> ProductCode.create
+  |> checkProductCodeExists
+  ​// returns a bool :(​
+```
+
+- 이 함수는 ProductCode를 리턴해야하는데 checkProductCodeExists로 끝나기 때문에 bool 값을 리턴하는
+  문제가 있다.
+
+### Creating Function Adapters
+
+- 앞에 toProductCode에서 bool을 리턴하는 문제를 checkProductCodeExists 스펙을 변경하지 않고
+  adapter 함수를 만들어 해결할 수 있다.
+
+```f#
+let​ convertToPassthru checkProductCodeExists productCode =
+  if​ checkProductCodeExists productCode ​then​
+    productCode
+  ​else​
+    failwith ​"Invalid Product Code"​
+```
+
+- 이 함수는 더 일반화 할 수 있다.
+
+```f#
+​let​ predicateToPassthru errorMsg f x =
+  ​if​ f x ​then​
+    x
+  ​else​
+    failwith errorMsg
+
+val​ predicateToPassthru : errorMsg:​string​ -> f:(​'​a -> ​bool​) -> x:​'​a -> ​'​a
+```
+
+- 이 함수를 적용해 toProductCode 함수를 고쳐보자
+
+```f#
+​let​ toProductCode (checkProductCodeExists:CheckProductCodeExists) productCode =
+  // create a local ProductCode -> ProductCode function​
+  // suitable for using in a pipeline​
+  ​let​ checkProduct productCode =
+    ​let​ errorMsg = sprintf ​"Invalid: %A"​ productCode
+      predicateToPassthru errorMsg checkProductCodeExists productCode
+​ 
+  ​// assemble the pipeline​
+  productCode
+  |> ProductCode.create
+  |> checkProduct
+```
