@@ -334,3 +334,48 @@ val​ predicateToPassthru : errorMsg:​string​ -> f:(​'​a -> ​bool​)
   |> ProductCode.create
   |> checkProduct
 ```
+
+## Implementing the Rest of the Steps
+
+- validateOrder는 위에서 해봤고 이제 priceOrder를 만들어보자. 역시 원래 버전에서 effect를
+  제거한 버전으로 타입을 바꾸자.
+
+```f#
+type PriceOrder =
+    GetPricingFunction  // dependency
+     -> ValidatedOrder  // input
+     -> Result<PricedOrder, PricingError>  // output
+```
+
+```f#
+type GetProductPrice = ProductCode -> Price
+type PriceOrder =
+    GetPricingFunction  // dependency
+     -> ValidatedOrder  // input
+     -> PricedOrder     // output
+```
+
+- 구현은 아래와 같다.
+
+```f#
+​let​ priceOrder : PriceOrder =
+​ 	  ​fun​ getProductPrice validatedOrder ->
+​ 	    ​let​ lines =
+​ 	      validatedOrder.Lines
+​ 	      |> List.map (toPricedOrderLine getProductPrice)
+​ 	    ​let​ amountToBill =
+​ 	      lines
+​ 	      ​// get each line price​
+​ 	      |> List.map (​fun​ line -> line.LinePrice)
+​ 	      ​// add them together as a BillingAmount​
+​ 	      |> BillingAmount.sumPrices
+      ​let​ pricedOrder : PricedOrder = {
+​ 	      OrderId  = validatedOrder.OrderId
+​ 	      CustomerInfo = validatedOrder.CustomerInfo
+​ 	      ShippingAddress = validatedOrder.ShippingAddress
+​ 	      BillingAddress = validatedOrder.BillingAddress
+​ 	      Lines = lines
+​ 	      AmountToBill = amountToBill
+​ 	      }
+​ 	    pricedOrder
+```
