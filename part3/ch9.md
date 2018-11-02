@@ -379,3 +379,83 @@ type PriceOrder =
 ​ 	      }
 ​ 	    pricedOrder
 ```
+
+- `BillingAmount.sumPrices` 는 다음과 같다.
+
+```f#
+/// Sum a list of prices to make a billing amount​
+/// Raise exception if total is out of bounds​
+​let​ sumPrices prices =
+  ​let​ total = prices |> List.map Price.value |> List.sum
+  create total
+```
+
+- `toPricedOrderLine` 함수는 다음과 같다.
+
+```f#
+/// Transform a ValidatedOrderLine to a PricedOrderLine​
+let​ toPricedOrderLine getProductPrice (line:ValidatedOrderLine) : PricedOrderLine =
+  let​ qty = line.Quantity |> OrderQuantity.value
+  let​ price = line.ProductCode |> getProductPrice
+  let​ linePrice = price |> Price.multiply qty
+  {
+    OrderLineId = line.OrderLineId
+    ProductCode = line.ProductCode
+    Quantity = line.Quantity
+    LinePrice = linePrice
+  }
+```
+
+- pricing 단계는 끝났고 다음은 acknowledgment 단계를 구현해보자.
+
+### Implementing the Acknowledgment Step
+
+- 아래는 effect를 제거한 acknowledgment 단계다.
+
+```f#
+type​ HtmlString = HtmlString ​of​ ​string​
+type​ CreateOrderAcknowledgmentLetter =
+  PricedOrder -> HtmlString
+
+  type​ OrderAcknowledgment = {
+    EmailAddress : EmailAddress
+    Letter : HtmlString
+  }
+  type​ SendResult = Sent | NotSent
+  type​ SendOrderAcknowledgment =
+    OrderAcknowledgment -> SendResult
+
+  ​type​ AcknowledgeOrder =
+    CreateOrderAcknowledgmentLetter     ​// dependency​
+      -> SendOrderAcknowledgment        ​// dependency​
+      -> PricedOrder                    ​// input​
+      -> OrderAcknowledgmentSent option ​// output​
+```
+
+- 아래는 구현 부분이다.
+
+```f#
+let​ acknowledgeOrder : AcknowledgeOrder =
+  ​fun​ createAcknowledgmentLetter sendAcknowledgment pricedOrder ->
+    ​let​ letter = createAcknowledgmentLetter pricedOrder
+    ​let​ acknowledgment = {
+      EmailAddress = pricedOrder.CustomerInfo.EmailAddress
+      Letter = letter
+    }
+
+    ​// if the acknowledgment was successfully sent,​
+    ​// return the corresponding event, else return None​
+    ​match​ sendAcknowledgment acknowledgment ​with​
+    | Sent ->
+      ​let​ ​event​ = {
+        OrderId = pricedOrder.OrderId
+        EmailAddress = pricedOrder.CustomerInfo.EmailAddress
+      }
+      Some ​event​
+    | NotSent ->
+      None
+```
+
+- 특별한 부분은 없다.
+
+## Creating the Event
