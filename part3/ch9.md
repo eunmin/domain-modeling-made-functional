@@ -459,3 +459,199 @@ let​ acknowledgeOrder : AcknowledgeOrder =
 - 특별한 부분은 없다.
 
 ## Creating the Event
+
+```f#
+/// Event to send to shipping context​
+type​ OrderPlaced = PricedOrder
+
+​/// Event to send to billing context​
+/// Will only be created if the AmountToBill is not zero​
+type​ BillableOrderPlaced = {
+  OrderId : OrderId
+  BillingAddress: Address
+  AmountToBill : BillingAmount
+}
+​
+type​ PlaceOrderEvent =
+    | OrderPlaced ​of​ OrderPlaced
+    | BillableOrderPlaced ​of​ BillableOrderPlaced
+    | AcknowledgmentSent  ​of​ OrderAcknowledgmentSent
+
+​type​ CreateEvents =
+  PricedOrder                            ​// input​
+    -> OrderAcknowledgmentSent option    ​// input (event from previous step)​
+    -> PlaceOrderEvent ​list​              ​// output​
+```
+
+```f#
+// PricedOrder -> BillableOrderPlaced option​
+let​ createBillingEvent (placedOrder:PricedOrder) : BillableOrderPlaced option =
+  ​let​ billingAmount = placedOrder.AmountToBill |> BillingAmount.value
+    if​ billingAmount > 0M ​then​
+      ​let​ order = {
+        OrderId = placedOrder.OrderId
+        BillingAddress = placedOrder.BillingAddress
+        AmountToBill = placedOrder.AmountToBill
+      }
+      Some order
+    ​else​
+      None
+```
+
+```f#
+  ​let​ createEvents : CreateEvents =
+    ​fun​ pricedOrder acknowledgmentEventOpt ->
+      ​let​ event1 =
+        pricedOrder
+        ​// convert to common choice type​
+        |> PlaceOrderEvent.OrderPlaced
+      ​let​ event2Opt =
+        acknowledgmentEventOpt
+        ​// convert to common choice type​
+        |> Option.map PlaceOrderEvent.AcknowledgmentSent
+      ​let​ event3Opt =
+        pricedOrder
+        |> createBillingEvent
+        ​// convert to common choice type​
+        |> Option.map PlaceOrderEvent.BillableOrderPlaced
+
+      ​// return all the events how?​
+​ 	    ...
+```
+
+- 일부 이벤트는 결과가 Optional 타입이기 때문아 아래 helper 함수로 리턴 타입을 맞춰준다.
+
+```f#
+/// convert an Option into a List​
+let​ listOfOption opt =
+  match​ opt ​with​
+    | Some x -> [x]
+    | None -> []
+```
+
+```f#
+let​ createEvents : CreateEvents =
+  ​fun​ pricedOrder acknowledgmentEventOpt ->
+    ​let​ events1 =
+      pricedOrder
+      ​// convert to common choice type​
+      |> PlaceOrderEvent.OrderPlaced
+      ​// convert to list​
+      |> List.singleton
+    ​let​ events2 =
+      acknowledgmentEventOpt
+      ​// convert to common choice type​
+      |> Option.map PlaceOrderEvent.AcknowledgmentSent
+      ​// convert to list​
+      |> listOfOption
+    ​let​ events3 =
+      pricedOrder
+      |> createBillingEvent
+      ​// convert to common choice type​
+      |> Option.map PlaceOrderEvent.BillableOrderPlaced
+      ​// convert to list​
+      |> listOfOption
+
+    ​// return all the events​
+    [
+      ​yield​! events1
+      ​yield​! events2
+      ​yield​! events3
+    ]
+```
+
+## Composing the Pipeline Steps Together
+
+- 워크플로우는 아래 처럼 생겼는데 문제가 있다.
+
+```f#
+let​ placeOrder : PlaceOrderWorkflow =
+  ​fun​ unvalidatedOrder ->
+    unvalidatedOrder
+    |> validateOrder
+    |> priceOrder
+    |> acknowledgeOrder
+    |> createEvents
+```
+
+- validateOrder 함수는 인자로 디팬던시 함수 CheckProductCodeExists, CheckAddressExists와
+  입력값 UnvalidatedOrder을 받아야하지만 이전 플로우에서는 unvalidatedOrder만 준다.
+- 마찬가지로 priceOrder 함수도 인자로 디팬던시 함수 getProductPrice와 입력값 validatedOrder가
+  필요하지만 이전 플로우인 validateOrder 함수에서는 validatedOrder만 리턴하기 때문에 입력값이 달라
+  Composing할 수 없다.
+- 이 문제를 푸는 일반적인 방법은 모나드를 사용하는 것이지만 여기서는 partial로 간단하게 해결해보자.
+
+- 디팬던시를 이미 포함하고 있는 validateOrder 함수를 아래 처럼 만들어보자.
+
+```f#
+let​ validateOrderWithDependenciesBakedIn =
+  validateOrder checkProductCodeExists checkAddressExists
+
+  // new function signature after partial application:​
+  // UnvalidatedOrder -> ValidatedOrder​
+```
+
+- F#은 다행이 쉐도윙이라고 부르는 방법으로 `validateOrder` 함수이름을 그대로 쓸 수 있다.
+
+```f#
+let​ validateOrder =
+  validateOrder checkProductCodeExists checkAddressExists
+```
+
+- 다른 언어들은 이런 식으로 이름을 바꿔써도 좋다.
+
+```f#
+​let​ validateOrder' =
+  validateOrder checkProductCodeExists checkAddressExists
+```
+
+- 이렇게 하면 앞에 두 디팬던시 파라미터가 부분적용되어 입력값이 UnvalidatedOrder 만 받을 수 있는
+  함수가 생겨 조합이 가능하다.
+- 그래서 디팬던시를 부분적용한 PlaceOrderWorkflow는 아래 처럼 만들 수 있다.
+
+```f#
+​let​ placeOrder : PlaceOrderWorkflow =
+  ​// set up local versions of the pipeline stages​
+  ​// using partial application to bake in the dependencies​
+  let​ validateOrder =
+    validateOrder checkProductCodeExists checkAddressExists
+  ​let​ priceOrder =
+    priceOrder getProductPrice
+  ​let​ acknowledgeOrder =
+    acknowledgeOrder createAcknowledgmentLetter sendAcknowledgment
+
+  // return the workflow function​
+  ​fun​ unvalidatedOrder ->
+    ​// compose the pipeline from the new one-parameter functions​
+    unvalidatedOrder
+      |> validateOrder
+      |> priceOrder
+      |> acknowledgeOrder
+      |> createEvents
+```
+
+- 이렇게해도 함수 조합이 힘든 경우가 있는데 acknowledgeOrder 함수의 결과가 그냥 이벤트이고
+  pricedOrder가 아니기 때문에 createEvents에 전달 할 수 없다.
+- 이런경우에는 절차형 프로그래밍 처람 각 단계의 결과를 변수에 할하는 방법으로 해결 할 수 있다.
+
+```f#
+let​ placeOrder : PlaceOrderWorkflow =
+  ​// return the workflow function​
+  fun​ unvalidatedOrder ->
+    ​let​ validatedOrder =
+      unvalidatedOrder
+      |> validateOrder checkProductCodeExists checkAddressExists
+    ​let​ pricedOrder =
+      validatedOrder
+      |> priceOrder getProductPrice
+    let​ acknowledgmentOption =
+      pricedOrder
+      |> acknowledgeOrder createAcknowledgmentLetter sendAcknowledgment
+    let​ events =
+      createEvents pricedOrder acknowledgmentOption
+    events
+```
+
+- 다음은 디팬던시를 전역으로 선언하지 않고 inject 하는 방법을 살펴보자.
+
+## Injecting Dependencies
