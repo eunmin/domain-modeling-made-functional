@@ -2,7 +2,8 @@
 
 https://www.youtube.com/watch?v=1pSH8kElmM4
 
-시스템에 쓰레기를 넣으면 쓰레기가 나온다. 올바른 값을 넣기 위한 타입 시스템을 알아보자.
+시스템에 쓰레기를 넣으면 쓰레기가 나온다. 
+F# 타입 시스템으로 도메인 모델링을 해보자.
 
 ## 뭐가 잘 못 된 건가?
 
@@ -19,7 +20,7 @@ type Contact = {
 
 - 옵셔널 타입에 대한 정의가 없다
 - MiddleInitial 은 옵셔널
-- FirstName에 대한 제약 조건이 없다 (리턴 문자?)
+- FirstName,LastName,EmailAddress에 대한 제약 조건이 없다
 - 이름과 이메일 영역은 함께 변경 되기 때문에 묶어야 한다.
 - IsEmailVerified false가 초기값인지 인증 받지 않은 것인지 구분되지 않는다.
 
