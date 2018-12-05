@@ -22,7 +22,6 @@ type Contact = {
 - MiddleInitial 은 옵셔널
 - FirstName,LastName,EmailAddress에 대한 제약 조건이 없다
 - 이름과 이메일 영역은 함께 변경 되기 때문에 묶어야 한다.
-- IsEmailVerified false가 초기값인지 인증 받지 않은 것인지 구분되지 않는다.
 
 ## DDD
 
