@@ -74,7 +74,38 @@ package example {
       case class Unverified(emailAddress: EmailAddress) extends EmailContactInfo
       case class Verified(emailAddress: VerifiedEmail) extends EmailContactInfo
 
-      case class Contact(name: PersonalName, email: EmailAddress)
+      case class PostalContactInfo()
+
+      /*
+      type ContactInfo =
+        | EmailOnly of EmailContactInfo
+        | AddrOnly of PostalContactInfo
+        | EmailAndAddr of EmailContactInfo * PostalContactInfo
+
+      type Contact = {
+        Name: Name
+        ContactInfo: ContactInfo
+      }
+      */
+      abstract class ContactInfo
+      case class EmailOnly(emailContactInfo: EmailContactInfo) extends ContactInfo
+      case class AddrOnly(postalContactInfo: PostalContactInfo) extends ContactInfo
+      case class EmailAndAddr(pair: (EmailContactInfo, PostalContactInfo))
+
+      case class Contact(name: PersonalName, contactInfo: ContactInfo)
+
+      /*
+      type ContactInfo =
+        | Email of EmailContactInfo
+        | Addr of PostalContactInfo
+
+      type Contact = {
+        Name: Name
+        PrimaryContactInfo: ContactInfo
+        SecondaryContactInfo: ContactInfo option
+      }
+      */
+      case class MultiContact(name: PersonalName, primaryContactInfo: ContactInfo, secondContactInfo: Option[ContactInfo])
     }
   }
 
